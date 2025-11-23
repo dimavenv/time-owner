@@ -422,6 +422,79 @@ body {
 .btn-logout:hover { background: var(--bg-hover); }
 .btn-delete { background: var(--danger-color); border-color: var(--danger-color); }
 .btn-delete:hover { background: #c32727; }
+/* --- СТИЛИ ДЛЯ БЛОКА ПОДПИСКИ --- */
+.subscription-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    background: var(--bg-main); /* Чуть темнее фона секции */
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.subscription-badge {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-size: 1.2em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    user-select: none;
+}
+
+/* Стиль по умолчанию (Free) */
+.subscription-badge.free {
+    background: linear-gradient(135deg, #3a3a3a, #555);
+    color: #e0e0e0;
+    border: 1px solid #666;
+}
+
+/* Стиль для Premium (на будущее) */
+.subscription-badge.premium {
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    color: #000;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
+    border: none;
+}
+/* Стиль для Pro/Max (на будущее) */
+.subscription-badge.premium_plus {
+    background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%);
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 15px rgba(161, 140, 209, 0.4);
+    border: none;
+}
+
+.subscription-badge:hover {
+    transform: scale(1.02);
+}
+
+.btn-tariffs {
+    background: transparent;
+    border: 2px solid var(--accent-color);
+    color: var(--accent-color);
+    width: 100%;
+    justify-content: center;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.btn-tariffs:hover {
+    background: var(--accent-color);
+    color: #fff;
+    box-shadow: 0 0 15px rgba(0, 123, 255, 0.4);
+    transform: translateY(-2px);
+}
 
 /* --- СТИЛИ ДЛЯ АНИМАЦИИ ЗАГРУЗКИ --- */
 #loadingOverlay {
@@ -1721,7 +1794,18 @@ select.form-control {
                 <button id="saveNickBtn" class="btn btn-save-nick">Сохранить</button>
             </div>
         </div>
-
+        <div class="profile-section">
+            <h3>Ваша подписка</h3>
+            <div class="subscription-container">
+                <div id="subscriptionBadge" class="subscription-badge">
+                    <span class="sub-icon">🌟</span>
+                    <span id="subName">Free</span>
+                </div>
+                <a href="/tarifs" class="btn btn-tariffs">
+                    💎 Посмотреть тарифы
+                </a>
+            </div>
+        </div>
         <div class="profile-section">
             <h3>Управление аккаунтом</h3>
             <button id="deleteProfileBtn" class="btn btn-delete">
@@ -2167,9 +2251,9 @@ async function loadDataFromSupabase() {
     showLoading();
     const { data: result, error } = await supabase
         .from('user_data')
-        .select('data_json')
+        .select('data_json, subscription') // <--- ДОБАВИЛИ КОЛОНКУ
         .eq('data_key', dataKey)
-        .single(); 
+        .single();
     hideLoading();
     if (error && error.code !== 'PGRST116') { 
         console.error("Ошибка Supabase при загрузке:", error);
@@ -2180,7 +2264,18 @@ async function loadDataFromSupabase() {
         ? result.data_json 
         : {goals:[],habits:[],habitRecords:[], moodRecords:{}}; 
 
+    // --- НОВЫЙ КОД: Сохраняем подписку в глобальный объект data ---
+    // Данные приходят в формате jsonb: subscription: { "subscription": "free" }
+    // Либо null, если поле пустое
+    let userSub = 'free';
+    if (result && result.subscription && result.subscription.subscription) {
+        userSub = result.subscription.subscription;
+    }
+    loadedData.currentSubscription = userSub; // Сохраняем в память
+    // ---------------------------------------------------------------
+
     if (!loadedData.goals) loadedData.goals = [];
+    // ... дальше без изменений ...
     if (!loadedData.habits) loadedData.habits = [];
     if (!loadedData.habitRecords) loadedData.habitRecords = [];
     if (!loadedData.moodRecords) loadedData.moodRecords = {};
@@ -2488,13 +2583,38 @@ function handleAccountControlClick() { openProfileModal(); }
 function openProfileModal() {
     nickInput.value = localStorage.getItem(STORAGE_KEY_USERNAME) || '';
     
-    // Считаем и отображаем статистику (пока заглушка)
+    // Считаем и отображаем статистику
     const stats = calculateTaskStats();
     const completedEl = document.getElementById('completedTasksCount');
     const uncompletedEl = document.getElementById('uncompletedTasksCount');
     
     if (completedEl) completedEl.textContent = stats.completed;
     if (uncompletedEl) uncompletedEl.textContent = stats.uncompleted;
+
+    // --- НОВЫЙ КОД: ОТОБРАЖЕНИЕ ПОДПИСКИ ---
+    const subBadge = document.getElementById('subscriptionBadge');
+    const subName = document.getElementById('subName');
+    
+    // Получаем статус из loadedData (который мы сохранили в пункте А)
+    // Если вдруг данных нет, считаем что 'free'
+    const currentSub = (data && data.currentSubscription) ? data.currentSubscription : 'free';
+    
+    // Сбрасываем старые классы (оставляем только базовый)
+    subBadge.className = 'subscription-badge';
+    
+    // Настраиваем вид в зависимости от тарифа
+    if (currentSub === 'premium') {
+        subBadge.classList.add('premium');
+        subName.textContent = 'Premium';
+    } else if (currentSub === 'premium_plus') {
+        subBadge.classList.add('premium_plus');
+        subName.textContent = 'Premium+';
+    } else {
+        // По умолчанию Free
+        subBadge.classList.add('free');
+        subName.textContent = 'Free Plan';
+    }
+    // ----------------------------------------
     
     profileModal.style.display='flex';
     setTimeout(()=>profileModal.classList.add('visible'), 10);
